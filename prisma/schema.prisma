@@ -1,0 +1,221 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum LeadStatus {
+  new
+  contacted
+  hot
+  closed
+  lost
+}
+
+enum UserRole {
+  superadmin
+  admin
+  manager
+  agent
+}
+
+model Organization {
+  id        String   @id @default(uuid()) @db.Uuid
+  orgId     String   @unique @default(uuid()) @db.Uuid
+  name      String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  deletedAt DateTime?
+
+  users      User[]
+  leads      Lead[]
+  activities Activity[]
+  notes      Note[]
+  leadTags   LeadTag[]
+  emailLogs  EmailLog[]
+
+  @@index([orgId])
+}
+
+model User {
+  id            String       @id @default(uuid()) @db.Uuid
+  orgId         String       @db.Uuid
+  name          String
+  email         String       @unique
+  emailVerified Boolean      @default(false)
+  image         String?
+  role          UserRole     @default(agent)
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+  deletedAt     DateTime?
+
+  org Organization @relation(fields: [orgId], references: [orgId], onDelete: Restrict, onUpdate: Cascade)
+
+  sessions Session[]
+  accounts Account[]
+
+  assignedLeads     Lead[]     @relation("LeadAssignee")
+  createdActivities Activity[] @relation("ActivityCreator")
+  createdNotes      Note[]     @relation("NoteCreator")
+  createdEmailLogs  EmailLog[] @relation("EmailLogCreator")
+
+  @@index([orgId])
+  @@map("user")
+}
+
+model Session {
+  id        String   @id @default(uuid()) @db.Uuid
+  userId    String   @db.Uuid
+  token     String   @unique
+  expiresAt DateTime
+  ipAddress String?
+  userAgent String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  @@index([userId])
+  @@map("session")
+}
+
+model Account {
+  id                    String   @id @default(uuid()) @db.Uuid
+  userId                String   @db.Uuid
+  accountId             String
+  providerId            String
+  accessToken           String?
+  refreshToken          String?
+  accessTokenExpiresAt  DateTime?
+  refreshTokenExpiresAt DateTime?
+  scope                 String?
+  idToken               String?
+  password              String?
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  @@index([userId])
+  @@unique([providerId, accountId])
+  @@map("account")
+}
+
+model Verification {
+  id         String   @id @default(uuid()) @db.Uuid
+  identifier String
+  value      String
+  expiresAt  DateTime
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([identifier])
+  @@map("verification")
+}
+
+model Lead {
+  id           String     @id @default(uuid()) @db.Uuid
+  orgId        String     @db.Uuid
+  name         String
+  email        String?
+  phone        String?
+  status       LeadStatus @default(new)
+  assignedToId String?    @db.Uuid
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+  deletedAt    DateTime?
+
+  org        Organization @relation(fields: [orgId], references: [orgId], onDelete: Restrict, onUpdate: Cascade)
+  assignedTo User?        @relation("LeadAssignee", fields: [assignedToId], references: [id], onDelete: SetNull, onUpdate: Cascade)
+
+  activities Activity[]
+  notes      Note[]
+  tags       LeadTag[]
+  emailLogs  EmailLog[]
+
+  @@index([orgId])
+  @@index([orgId, status])
+  @@index([orgId, assignedToId])
+  @@index([orgId, createdAt(sort: Desc)])
+}
+
+model Activity {
+  id          String   @id @default(uuid()) @db.Uuid
+  orgId       String   @db.Uuid
+  leadId      String   @db.Uuid
+  type        String
+  content     String?
+  createdById String?  @db.Uuid
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  deletedAt   DateTime?
+
+  org       Organization @relation(fields: [orgId], references: [orgId], onDelete: Restrict, onUpdate: Cascade)
+  lead      Lead         @relation(fields: [leadId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  createdBy User?        @relation("ActivityCreator", fields: [createdById], references: [id], onDelete: SetNull, onUpdate: Cascade)
+
+  @@index([orgId])
+  @@index([orgId, leadId])
+  @@index([orgId, createdAt(sort: Desc)])
+}
+
+model Note {
+  id          String   @id @default(uuid()) @db.Uuid
+  orgId       String   @db.Uuid
+  leadId      String   @db.Uuid
+  body        String
+  createdById String?  @db.Uuid
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  deletedAt   DateTime?
+
+  org       Organization @relation(fields: [orgId], references: [orgId], onDelete: Restrict, onUpdate: Cascade)
+  lead      Lead         @relation(fields: [leadId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  createdBy User?        @relation("NoteCreator", fields: [createdById], references: [id], onDelete: SetNull, onUpdate: Cascade)
+
+  @@index([orgId])
+  @@index([orgId, leadId])
+  @@index([orgId, createdAt(sort: Desc)])
+}
+
+model LeadTag {
+  id        String   @id @default(uuid()) @db.Uuid
+  orgId     String   @db.Uuid
+  leadId    String   @db.Uuid
+  name      String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  deletedAt DateTime?
+
+  org  Organization @relation(fields: [orgId], references: [orgId], onDelete: Restrict, onUpdate: Cascade)
+  lead Lead         @relation(fields: [leadId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+
+  @@index([orgId])
+  @@index([orgId, leadId])
+  @@unique([orgId, leadId, name])
+}
+
+model EmailLog {
+  id          String   @id @default(uuid()) @db.Uuid
+  orgId       String   @db.Uuid
+  leadId      String   @db.Uuid
+  to          String
+  subject     String
+  body        String?
+  status      String?
+  createdById String?  @db.Uuid
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  deletedAt   DateTime?
+
+  org       Organization @relation(fields: [orgId], references: [orgId], onDelete: Restrict, onUpdate: Cascade)
+  lead      Lead         @relation(fields: [leadId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  createdBy User?        @relation("EmailLogCreator", fields: [createdById], references: [id], onDelete: SetNull, onUpdate: Cascade)
+
+  @@index([orgId])
+  @@index([orgId, leadId])
+  @@index([orgId, createdAt(sort: Desc)])
+}
