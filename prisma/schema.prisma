@@ -1,175 +1,205 @@
+// Generator tells Prisma how to generate the client code
+// "prisma-client" means it will generate a TypeScript/JS client you can use in your app
 generator client {
-  provider = "prisma-client"
-  output   = "../src/generated/prisma"
+  provider = "prisma-client"          // Which generator to use
+  output   = "../src/generated/prisma" // Where to put the generated files
 }
 
+// Datasource tells Prisma which database you're connecting to
 datasource db {
-  provider = "postgresql"
+  provider = "postgresql" // We're using PostgreSQL as our database
 }
 
+// Enum = a fixed list of allowed values (like a dropdown)
+// LeadStatus defines what "stage" a sales lead can be in
 enum LeadStatus {
-  new
-  contacted
-  hot
-  closed
-  lost
+  new       // Just came in, nobody has looked at it yet
+  contacted // Someone reached out to this lead
+  hot       // Lead is very interested, close to buying
+  closed    // Deal was completed successfully
+  lost      // Lead didn't convert, we gave up
 }
 
+// UserRole defines what level of access a user has in the system
 enum UserRole {
-  superadmin
-  admin
-  manager
-  agent
+  superadmin // God mode - can do everything across all organizations
+  admin      // Can manage everything inside their organization
+  manager    // Can manage agents and leads inside their organization
+  agent      // Regular salesperson, can manage their own leads
 }
 
+// model = a database TABLE
+// Organization = one "company/tenant" using your app (multi-tenant means multiple companies share the same app)
 model Organization {
-  id        String   @id @default(uuid()) @db.Uuid
-  orgId     String   @unique @default(uuid()) @db.Uuid
-  name      String
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-  deletedAt DateTime?
+  id        String    @id @default(uuid()) @db.Uuid  // Primary key, auto-generates a unique ID like "a1b2c3d4-..."
+  orgId     String    @unique @default(uuid()) @db.Uuid // A second unique ID used to link related records (explained below)
+  name      String    // The company's name, e.g. "Acme Corp"
+  createdAt DateTime  @default(now()) // Automatically set to current date/time when record is created
+  updatedAt DateTime  @updatedAt      // Automatically updates to current date/time whenever record changes
+  deletedAt DateTime?                 // "?" means nullable/optional - used for "soft delete" (mark as deleted without actually removing from DB)
 
-  users      User[]
-  leads      Lead[]
-  activities Activity[]
-  notes      Note[]
-  leadTags   LeadTag[]
-  emailLogs  EmailLog[]
+  // These are RELATIONS - virtual fields that let you access related records
+  // They don't create columns in the DB, they just tell Prisma how tables connect
+  users      User[]      // One organization has MANY users     ([] = array = many)
+  leads      Lead[]      // One organization has MANY leads
+  activities Activity[]  // One organization has MANY activities
+  notes      Note[]      // One organization has MANY notes
+  leadTags   LeadTag[]   // One organization has MANY lead tags
+  emailLogs  EmailLog[]  // One organization has MANY email logs
 
-  @@index([orgId])
+  @@index([orgId]) // Create a database INDEX on orgId - makes lookups by orgId much faster
 }
 
+// User = a person who logs into your dashboard
 model User {
-  id            String       @id @default(uuid()) @db.Uuid
-  orgId         String       @db.Uuid
-  name          String
-  email         String       @unique
-  emailVerified Boolean      @default(false)
-  image         String?
-  role          UserRole     @default(agent)
-  createdAt     DateTime     @default(now())
-  updatedAt     DateTime     @updatedAt
-  deletedAt     DateTime?
+  id            String    @id @default(uuid()) @db.Uuid // Unique ID for this user
+  orgId         String    @db.Uuid   // Which organization this user belongs to (Foreign Key - points to Organization.orgId)
+  name          String               // User's full name
+  email         String    @unique    // Email must be unique across ALL users in the entire DB
+  emailVerified Boolean   @default(false) // Has the user verified their email? Starts as false
+  image         String?              // Profile picture URL (optional)
+  role          UserRole  @default(agent) // Their permission level, defaults to "agent"
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  deletedAt     DateTime?            // Soft delete field
 
+  // RELATION: This user BELONGS TO one organization
+  // fields: [orgId]          = the column in THIS table (User.orgId)
+  // references: [orgId]      = the column in the OTHER table (Organization.orgId)
+  // onDelete: Restrict       = BLOCK deletion of org if users still exist under it
+  // onUpdate: Cascade        = if org's orgId changes, auto-update this table too
   org Organization @relation(fields: [orgId], references: [orgId], onDelete: Restrict, onUpdate: Cascade)
 
-  sessions Session[]
-  accounts Account[]
+  // Auth-related relations (for login sessions and OAuth like Google login)
+  sessions Session[] // A user can have many active sessions (e.g. logged in on phone + laptop)
+  accounts Account[] // A user can have many auth accounts (e.g. email+password AND Google login)
 
-  assignedLeads     Lead[]     @relation("LeadAssignee")
-  createdActivities Activity[] @relation("ActivityCreator")
-  createdNotes      Note[]     @relation("NoteCreator")
-  createdEmailLogs  EmailLog[] @relation("EmailLogCreator")
+  // Business relations
+  assignedLeads     Lead[]     @relation("LeadAssignee")    // Leads assigned to this user
+  createdActivities Activity[] @relation("ActivityCreator") // Activities this user logged
+  createdNotes      Note[]     @relation("NoteCreator")     // Notes this user wrote
+  createdEmailLogs  EmailLog[] @relation("EmailLogCreator") // Emails this user sent
 
-  @@index([orgId])
-  @@map("user")
+  @@index([orgId]) // Index for fast lookup of "all users in org X"
+  @@map("user")    // The actual PostgreSQL table name will be "user" (lowercase)
 }
 
+// Session = tracks when someone is logged in
+// Every time someone logs in, a new session record is created
 model Session {
   id        String   @id @default(uuid()) @db.Uuid
-  userId    String   @db.Uuid
-  token     String   @unique
-  expiresAt DateTime
-  ipAddress String?
-  userAgent String?
+  userId    String   @db.Uuid   // Which user this session belongs to
+  token     String   @unique    // A secret random string given to the browser (like a key)
+  expiresAt DateTime            // When this session automatically expires (logs user out)
+  ipAddress String?             // The user's IP address when they logged in (optional, for security)
+  userAgent String?             // The browser/device info (optional, e.g. "Chrome on Windows")
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  // onDelete: Cascade = if the User is deleted, delete all their sessions too
   user User @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: Cascade)
 
   @@index([userId])
   @@map("session")
 }
 
+// Account = an authentication method a user can use to log in
+// Supports multiple providers: email/password, Google, GitHub, etc.
 model Account {
-  id                    String   @id @default(uuid()) @db.Uuid
-  userId                String   @db.Uuid
-  accountId             String
-  providerId            String
-  accessToken           String?
-  refreshToken          String?
-  accessTokenExpiresAt  DateTime?
-  refreshTokenExpiresAt DateTime?
-  scope                 String?
-  idToken               String?
-  password              String?
-  createdAt             DateTime @default(now())
-  updatedAt             DateTime @updatedAt
+  id                    String    @id @default(uuid()) @db.Uuid
+  userId                String    @db.Uuid  // Which user owns this account
+  accountId             String              // The user's ID on the external provider (e.g. Google's user ID)
+  providerId            String              // Which provider: "google", "github", "credential" (email/password)
+  accessToken           String?             // Token to make API calls on behalf of user (e.g. Google API)
+  refreshToken          String?             // Used to get a new accessToken when it expires
+  accessTokenExpiresAt  DateTime?           // When the access token expires
+  refreshTokenExpiresAt DateTime?           // When the refresh token expires
+  scope                 String?             // What permissions were granted (e.g. "email profile")
+  idToken               String?             // JWT token from OAuth providers
+  password              String?             // Hashed password (only for email/password login)
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: Cascade)
 
   @@index([userId])
-  @@unique([providerId, accountId])
+  @@unique([providerId, accountId]) // Same user can't link the same provider account twice
   @@map("account")
 }
 
+// Verification = stores temporary codes for things like "verify your email" or "reset password"
 model Verification {
   id         String   @id @default(uuid()) @db.Uuid
-  identifier String
-  value      String
-  expiresAt  DateTime
+  identifier String   // What we're verifying, e.g. the user's email address
+  value      String   // The secret code sent to the user (e.g. "483921")
+  expiresAt  DateTime // Code becomes invalid after this time
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
 
-  @@index([identifier])
+  @@index([identifier]) // Fast lookup by email when user submits the code
   @@map("verification")
 }
 
+// Lead = a potential customer/sale that your agents are tracking
 model Lead {
   id           String     @id @default(uuid()) @db.Uuid
-  orgId        String     @db.Uuid
-  name         String
-  email        String?
-  phone        String?
-  status       LeadStatus @default(new)
-  assignedToId String?    @db.Uuid
+  orgId        String     @db.Uuid      // Which organization owns this lead
+  name         String                   // Lead's full name
+  email        String?                  // Lead's email (optional)
+  phone        String?                  // Lead's phone number (optional)
+  status       LeadStatus @default(new) // Current stage in the sales pipeline, starts as "new"
+  assignedToId String?    @db.Uuid      // Which agent is working this lead (optional, nullable)
   createdAt    DateTime   @default(now())
   updatedAt    DateTime   @updatedAt
-  deletedAt    DateTime?
+  deletedAt    DateTime?                // Soft delete
 
   org        Organization @relation(fields: [orgId], references: [orgId], onDelete: Restrict, onUpdate: Cascade)
+  // onDelete: SetNull = if the assigned agent is deleted, just set assignedToId to NULL (don't delete the lead)
   assignedTo User?        @relation("LeadAssignee", fields: [assignedToId], references: [id], onDelete: SetNull, onUpdate: Cascade)
 
-  activities Activity[]
-  notes      Note[]
-  tags       LeadTag[]
-  emailLogs  EmailLog[]
+  activities Activity[] // All activities logged for this lead
+  notes      Note[]     // All notes written about this lead
+  tags       LeadTag[]  // All tags on this lead (for categorizing)
+  emailLogs  EmailLog[] // All emails sent to this lead
 
-  @@index([orgId])
-  @@index([orgId, status])
-  @@index([orgId, assignedToId])
-  @@index([orgId, createdAt(sort: Desc)])
+  @@index([orgId])                        // Fast: "get all leads for org X"
+  @@index([orgId, status])                // Fast: "get all HOT leads for org X"
+  @@index([orgId, assignedToId])          // Fast: "get all leads assigned to agent Y in org X"
+  @@index([orgId, createdAt(sort: Desc)]) // Fast: "get newest leads first for org X"
 }
 
+// Activity = a log entry of something that happened with a lead
+// e.g. "Called lead", "Sent proposal", "Had meeting"
 model Activity {
-  id          String   @id @default(uuid()) @db.Uuid
-  orgId       String   @db.Uuid
-  leadId      String   @db.Uuid
-  type        String
-  content     String?
-  createdById String?  @db.Uuid
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-  deletedAt   DateTime?
+  id          String    @id @default(uuid()) @db.Uuid
+  orgId       String    @db.Uuid  // Which org this belongs to (for multi-tenant data isolation)
+  leadId      String    @db.Uuid  // Which lead this activity is about
+  type        String              // What kind of activity: "call", "email", "meeting", etc.
+  content     String?             // Details/notes about what happened (optional)
+  createdById String?   @db.Uuid  // Which user logged this activity (optional)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  deletedAt   DateTime?           // Soft delete
 
   org       Organization @relation(fields: [orgId], references: [orgId], onDelete: Restrict, onUpdate: Cascade)
   lead      Lead         @relation(fields: [leadId], references: [id], onDelete: Restrict, onUpdate: Cascade)
   createdBy User?        @relation("ActivityCreator", fields: [createdById], references: [id], onDelete: SetNull, onUpdate: Cascade)
 
   @@index([orgId])
-  @@index([orgId, leadId])
-  @@index([orgId, createdAt(sort: Desc)])
+  @@index([orgId, leadId])                // Fast: "get all activities for lead X in org Y"
+  @@index([orgId, createdAt(sort: Desc)]) // Fast: "get most recent activities in org X"
 }
 
+// Note = a free-text note written by an agent about a lead
+// e.g. "Spoke to John, he's interested but needs board approval first"
 model Note {
-  id          String   @id @default(uuid()) @db.Uuid
-  orgId       String   @db.Uuid
-  leadId      String   @db.Uuid
-  body        String
-  createdById String?  @db.Uuid
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id          String    @id @default(uuid()) @db.Uuid
+  orgId       String    @db.Uuid
+  leadId      String    @db.Uuid  // Which lead this note is about
+  body        String              // The actual note text (required, not optional)
+  createdById String?   @db.Uuid  // Who wrote this note
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
   deletedAt   DateTime?
 
   org       Organization @relation(fields: [orgId], references: [orgId], onDelete: Restrict, onUpdate: Cascade)
@@ -181,13 +211,15 @@ model Note {
   @@index([orgId, createdAt(sort: Desc)])
 }
 
+// LeadTag = a label/category you can attach to a lead
+// e.g. "enterprise", "referral", "urgent", "follow-up"
 model LeadTag {
-  id        String   @id @default(uuid()) @db.Uuid
-  orgId     String   @db.Uuid
-  leadId    String   @db.Uuid
-  name      String
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id        String    @id @default(uuid()) @db.Uuid
+  orgId     String    @db.Uuid
+  leadId    String    @db.Uuid  // Which lead has this tag
+  name      String              // The tag text, e.g. "hot-prospect"
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
   deletedAt DateTime?
 
   org  Organization @relation(fields: [orgId], references: [orgId], onDelete: Restrict, onUpdate: Cascade)
@@ -195,20 +227,22 @@ model LeadTag {
 
   @@index([orgId])
   @@index([orgId, leadId])
-  @@unique([orgId, leadId, name])
+  @@unique([orgId, leadId, name]) // Can't add the same tag to the same lead twice in the same org
 }
 
+// EmailLog = a record of every email sent to a lead
+// Useful for tracking communication history
 model EmailLog {
-  id          String   @id @default(uuid()) @db.Uuid
-  orgId       String   @db.Uuid
-  leadId      String   @db.Uuid
-  to          String
-  subject     String
-  body        String?
-  status      String?
-  createdById String?  @db.Uuid
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id          String    @id @default(uuid()) @db.Uuid
+  orgId       String    @db.Uuid
+  leadId      String    @db.Uuid  // Which lead the email was sent to
+  to          String              // The recipient's email address
+  subject     String              // Email subject line
+  body        String?             // Email body content (optional, maybe stored elsewhere)
+  status      String?             // Delivery status: "sent", "delivered", "bounced", "failed" (optional)
+  createdById String?   @db.Uuid  // Which user sent this email
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
   deletedAt   DateTime?
 
   org       Organization @relation(fields: [orgId], references: [orgId], onDelete: Restrict, onUpdate: Cascade)
